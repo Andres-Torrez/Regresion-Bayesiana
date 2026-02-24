@@ -1,0 +1,28 @@
+{
+  "target": "discounted_price",
+  "use_log_target": true,
+  "cv": {
+    "train_rmse_mean": 0.3724996151753056,
+    "train_rmse_std": 0.0010281579589396042,
+    "test_rmse_mean": 0.37262610553062203,
+    "test_rmse_std": 0.004110640643118053,
+    "train_mae_mean": 0.27017155903486456,
+    "test_mae_mean": 0.27028607829151763,
+    "train_r2_mean": 0.8260697852100407,
+    "test_r2_mean": 0.8258948327768338
+  },
+  "holdout": {
+    "train": {
+      "rmse": 0.3725186656556588,
+      "mae": 0.27018636672090823,
+      "r2": 0.8260557614149321
+    },
+    "test": {
+      "rmse": 0.37584168559647757,
+      "mae": 0.2711601276405454,
+      "r2": 0.8240139227252608
+    },
+    "rmse_gap_ratio": 0.008920411907333685
+  },
+  "artifact": "models\\bayesridge_logtarget.joblib"
+}
