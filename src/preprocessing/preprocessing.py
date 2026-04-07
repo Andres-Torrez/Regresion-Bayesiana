@@ -5,7 +5,7 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-
+from sklearn.preprocessing import StandardScaler
 
 def load_data(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
@@ -74,6 +74,7 @@ def build_preprocessing_pipeline(X: pd.DataFrame):
 
     numeric_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
     ])
 
     categorical_transformer = Pipeline(steps=[
