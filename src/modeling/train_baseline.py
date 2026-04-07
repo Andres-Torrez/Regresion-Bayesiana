@@ -5,119 +5,228 @@ import numpy as np
 import pandas as pd
 from joblib import dump
 
-from sklearn.pipeline import Pipeline
 from sklearn.linear_model import BayesianRidge
-from sklearn.model_selection import KFold, cross_validate, train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import TimeSeriesSplit, cross_validate
+from sklearn.pipeline import Pipeline
 
-from src.preprocessing.preprocessing import load_data, clean_data, prepare_features, build_preprocessing_pipeline
+from src.preprocessing.preprocessing import (
+    load_data,
+    clean_data,
+    prepare_features,
+    build_preprocessing_pipeline,
+)
 
 
 def rmse(y_true, y_pred) -> float:
     return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 
 
-def evaluate_holdout(model, X_train, y_train, X_test, y_test):
+def mean_bias_error(y_true, y_pred) -> float:
+    return float(np.mean(y_pred - y_true))
+
+
+def chronological_train_test_split(
+    X: pd.DataFrame,
+    y: pd.Series,
+    df_ref: pd.DataFrame,
+    test_size: float = 0.2,
+):
+    """
+    Split cronológico basado en el orden temporal ya existente en df_ref.
+    Asume que df_ref, X e y están alineados por índice y orden.
+    """
+    if not 0 < test_size < 1:
+        raise ValueError("test_size must be between 0 and 1.")
+
+    n_samples = len(X)
+    split_idx = int(n_samples * (1 - test_size))
+
+    if split_idx <= 0 or split_idx >= n_samples:
+        raise ValueError("Invalid split index generated from test_size.")
+
+    X_train = X.iloc[:split_idx].copy()
+    X_test = X.iloc[split_idx:].copy()
+    y_train = y.iloc[:split_idx].copy()
+    y_test = y.iloc[split_idx:].copy()
+
+    df_train = df_ref.iloc[:split_idx].copy()
+    df_test = df_ref.iloc[split_idx:].copy()
+
+    return X_train, X_test, y_train, y_test, df_train, df_test
+
+
+def build_model(X_train: pd.DataFrame) -> Pipeline:
+    preprocessor = build_preprocessing_pipeline(X_train)
+
+    model = Pipeline(
+        steps=[
+            ("preprocess", preprocessor),
+            ("model", BayesianRidge()),
+        ]
+    )
+    return model
+
+
+def evaluate_holdout(model, X_train, y_train, X_test, y_test) -> dict:
     model.fit(X_train, y_train)
 
     pred_train = model.predict(X_train)
     pred_test = model.predict(X_test)
 
-    metrics = {
+    train_mae = mean_absolute_error(y_train, pred_train)
+    test_mae = mean_absolute_error(y_test, pred_test)
+    train_rmse = rmse(y_train, pred_train)
+    test_rmse = rmse(y_test, pred_test)
+
+    return {
         "train": {
-            "rmse": rmse(y_train, pred_train),
-            "mae": float(mean_absolute_error(y_train, pred_train)),
+            "mae": float(train_mae),
+            "rmse": float(train_rmse),
             "r2": float(r2_score(y_train, pred_train)),
+            "mbe": float(mean_bias_error(y_train, pred_train)),
         },
         "test": {
-            "rmse": rmse(y_test, pred_test),
-            "mae": float(mean_absolute_error(y_test, pred_test)),
+            "mae": float(test_mae),
+            "rmse": float(test_rmse),
             "r2": float(r2_score(y_test, pred_test)),
-        }
+            "mbe": float(mean_bias_error(y_test, pred_test)),
+        },
+        "overfitting": {
+            "mae_gap_ratio": float((test_mae - train_mae) / train_mae) if train_mae > 0 else None,
+            "rmse_gap_ratio": float((test_rmse - train_rmse) / train_rmse) if train_rmse > 0 else None,
+        },
     }
-
-    # overfitting gap on RMSE
-    tr = metrics["train"]["rmse"]
-    te = metrics["test"]["rmse"]
-    metrics["rmse_gap_ratio"] = float((te - tr) / tr) if tr > 0 else None
-    return metrics
 
 
 def main(
     data_path: str = "data/raw/amazon_sales_dataset.csv",
-    target: str = "discounted_price",
-    use_log_target: bool = False,
-    out_dir: str = "models",
-    report_dir: str = "reports",
-    seed: int = 42,
+    target: str = "quantity_sold",
+    out_dir: str = "models/baseline",
+    report_dir: str = "reports/metrics",
+    test_size: float = 0.2,
+    n_splits_cv: int = 5,
 ):
     out_dir = Path(out_dir)
     report_dir = Path(report_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report_dir.mkdir(parents=True, exist_ok=True)
 
+    # 1) Load and clean
     df = load_data(data_path)
     df = clean_data(df)
 
-    X, y = prepare_features(df, target=target)
+    if "order_date" not in df.columns:
+        raise ValueError("The dataset must contain 'order_date' for time-aware validation.")
 
-    # Optional: log-transform the target (recommended if target is skewed)
-    if use_log_target:
-        y = y.clip(lower=1e-9)
-        y = np.log(y)
+    # 2) Sort by time BEFORE feature preparation
+    df = df.sort_values("order_date").reset_index(drop=True)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=seed
+    # 3) Prepare features and target
+    X, y, df_prepared = prepare_features(df, target=target)
+
+    # Align indices defensively
+    X = X.reset_index(drop=True)
+    y = y.reset_index(drop=True)
+    df_prepared = df_prepared.reset_index(drop=True)
+
+    # 4) Chronological train/test split
+    X_train, X_test, y_train, y_test, df_train, df_test = chronological_train_test_split(
+        X=X,
+        y=y,
+        df_ref=df_prepared,
+        test_size=test_size,
     )
 
-    preprocessor = build_preprocessing_pipeline(X)
+    # 5) Build pipeline
+    model = build_model(X_train)
 
-    model = Pipeline(steps=[
-        ("preprocess", preprocessor),
-        ("model", BayesianRidge())
-    ])
+    # 6) Time-aware cross-validation on train only
+    tscv = TimeSeriesSplit(n_splits=n_splits_cv)
 
-    # Cross-validation (KFold)
-    cv = KFold(n_splits=5, shuffle=True, random_state=seed)
     scoring = {
-        "rmse": "neg_root_mean_squared_error",
         "mae": "neg_mean_absolute_error",
+        "rmse": "neg_root_mean_squared_error",
         "r2": "r2",
     }
-    cv_res = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring, return_train_score=True)
 
-    # Holdout evaluation
+    cv_res = cross_validate(
+        estimator=model,
+        X=X_train,
+        y=y_train,
+        cv=tscv,
+        scoring=scoring,
+        return_train_score=True,
+        n_jobs=None,
+    )
+
+    # 7) Holdout evaluation
     holdout_metrics = evaluate_holdout(model, X_train, y_train, X_test, y_test)
 
-    # Save model
-    model_name = "bayesridge_logtarget.joblib" if use_log_target else "bayesridge.joblib"
-    dump(model, out_dir / model_name)
+    # 8) Fit final model on full training set and save artifact
+    model.fit(X_train, y_train)
+    model_path = out_dir / "bayesian_ridge_quantity_sold.joblib"
+    dump(model, model_path)
 
-    # Save metrics report
+    # 9) Save metrics report
     report = {
+        "problem_type": "regression",
+        "model_name": "BayesianRidge",
         "target": target,
-        "use_log_target": use_log_target,
-        "cv": {
+        "validation_strategy": {
+            "holdout": "chronological",
+            "cross_validation": "TimeSeriesSplit",
+            "n_splits_cv": n_splits_cv,
+            "test_size": test_size,
+        },
+        "date_ranges": {
+            "train_start": str(df_train["order_date"].min()),
+            "train_end": str(df_train["order_date"].max()),
+            "test_start": str(df_test["order_date"].min()),
+            "test_end": str(df_test["order_date"].max()),
+        },
+        "n_samples": {
+            "full": int(len(X)),
+            "train": int(len(X_train)),
+            "test": int(len(X_test)),
+        },
+        "features": X_train.columns.tolist(),
+        "cv_metrics": {
+            "train_mae_mean": float((-cv_res["train_mae"]).mean()),
+            "train_mae_std": float((-cv_res["train_mae"]).std()),
+            "valid_mae_mean": float((-cv_res["test_mae"]).mean()),
+            "valid_mae_std": float((-cv_res["test_mae"]).std()),
             "train_rmse_mean": float((-cv_res["train_rmse"]).mean()),
             "train_rmse_std": float((-cv_res["train_rmse"]).std()),
-            "test_rmse_mean": float((-cv_res["test_rmse"]).mean()),
-            "test_rmse_std": float((-cv_res["test_rmse"]).std()),
-            "train_mae_mean": float((-cv_res["train_mae"]).mean()),
-            "test_mae_mean": float((-cv_res["test_mae"]).mean()),
-            "train_r2_mean": float((cv_res["train_r2"]).mean()),
-            "test_r2_mean": float((cv_res["test_r2"]).mean()),
+            "valid_rmse_mean": float((-cv_res["test_rmse"]).mean()),
+            "valid_rmse_std": float((-cv_res["test_rmse"]).std()),
+            "train_r2_mean": float(cv_res["train_r2"].mean()),
+            "train_r2_std": float(cv_res["train_r2"].std()),
+            "valid_r2_mean": float(cv_res["test_r2"].mean()),
+            "valid_r2_std": float(cv_res["test_r2"].std()),
         },
-        "holdout": holdout_metrics,
-        "artifact": str(out_dir / model_name),
+        "holdout_metrics": holdout_metrics,
+        "artifact_path": str(model_path),
     }
 
-    with open(report_dir / "metrics_baseline.json", "w", encoding="utf-8") as f:
+    report_path = report_dir / "metrics_baseline_quantity_sold.json"
+    with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
 
-    print("Saved:", out_dir / model_name)
-    print("Report:", report_dir / "metrics_baseline.json")
-    print("Holdout RMSE gap ratio:", report["holdout"]["rmse_gap_ratio"])
+    print(f"Model saved to: {model_path}")
+    print(f"Metrics report saved to: {report_path}")
+    print(
+        "Holdout test metrics | "
+        f"MAE={holdout_metrics['test']['mae']:.4f} | "
+        f"RMSE={holdout_metrics['test']['rmse']:.4f} | "
+        f"R2={holdout_metrics['test']['r2']:.4f}"
+    )
+    print(
+        "Train/Test date ranges | "
+        f"train=[{report['date_ranges']['train_start']} -> {report['date_ranges']['train_end']}] | "
+        f"test=[{report['date_ranges']['test_start']} -> {report['date_ranges']['test_end']}]"
+    )
 
 
 if __name__ == "__main__":
-    main(use_log_target=True)
+    main()
