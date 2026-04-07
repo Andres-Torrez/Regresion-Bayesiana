@@ -1,0 +1,70 @@
+{
+  "problem_type": "regression",
+  "model_name": "BayesianRidge",
+  "target": "quantity_sold",
+  "validation_strategy": {
+    "holdout": "chronological",
+    "cross_validation": "TimeSeriesSplit",
+    "n_splits_cv": 5,
+    "test_size": 0.2
+  },
+  "date_ranges": {
+    "train_start": "2022-01-01 00:00:00",
+    "train_end": "2023-08-06 00:00:00",
+    "test_start": "2023-08-06 00:00:00",
+    "test_end": "2023-12-31 00:00:00"
+  },
+  "n_samples": {
+    "full": 50000,
+    "train": 40000,
+    "test": 10000
+  },
+  "features": [
+    "price",
+    "discount_percent",
+    "rating",
+    "review_count",
+    "product_category",
+    "customer_region",
+    "payment_method",
+    "order_year",
+    "order_month",
+    "order_day",
+    "order_dayofweek",
+    "order_quarter",
+    "is_weekend"
+  ],
+  "cv_metrics": {
+    "train_mae_mean": 1.2041592047219747,
+    "train_mae_std": 0.002819292068980727,
+    "valid_mae_mean": 1.2033735680082829,
+    "valid_mae_std": 0.01164824909932366,
+    "train_rmse_mean": 1.4169604620167877,
+    "train_rmse_std": 0.0013624444164774246,
+    "valid_rmse_mean": 1.4143848562667736,
+    "valid_rmse_std": 0.010536669491897938,
+    "train_r2_mean": 0.00046384470130134137,
+    "train_r2_std": 0.00040163986734579113,
+    "valid_r2_mean": -0.000878459332192083,
+    "valid_r2_std": 0.0007424490154084399
+  },
+  "holdout_metrics": {
+    "train": {
+      "mae": 1.1993759220221474,
+      "rmse": 1.4144749212980003,
+      "r2": 5.5293761387242846e-05,
+      "mbe": -1.5702994460298215e-16
+    },
+    "test": {
+      "mae": 1.2081718233808905,
+      "rmse": 1.4188687680078826,
+      "r2": -2.2754145705405904e-06,
+      "mbe": 0.003971824745221379
+    },
+    "overfitting": {
+      "mae_gap_ratio": 0.007333731816054135,
+      "rmse_gap_ratio": 0.0031063447246206825
+    }
+  },
+  "artifact_path": "models\\baseline\\bayesian_ridge_quantity_sold.joblib"
+}
